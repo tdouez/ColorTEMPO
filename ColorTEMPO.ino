@@ -93,7 +93,7 @@ NTPClient timeClient(ntpUDP, "europe.pool.ntp.org", 3600, 60000);
 Ticker timer_blink;
 Ticker timer_round;
 
-const uint32_t black = pixels.Color(0, 0, 0);
+const uint32_t black = pixels_tour.Color(0, 0, 0);
 const uint32_t red = pixels_tour.Color(255, 0, 0);
 const uint32_t green = pixels_tour.Color(0, 255, 0);
 const uint32_t blue = pixels_tour.Color(0, 0, 255);
