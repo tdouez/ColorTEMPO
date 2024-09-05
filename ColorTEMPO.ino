@@ -29,6 +29,8 @@
 // Partage dans les Mêmes Conditions 4.0 International.
 //--------------------------------------------------------------------
 // 2023/12/20 - FB V1.0.0
+// 2024/04/04 - FB V1.0.1 - Mise à jour toutes les 5mn
+// 2024/09/05 - FB V1.1.0 - Changement de serveur pour la récupération de la couleur TEMPO
 //--------------------------------------------------------------------
 #include <Arduino.h>
 #include <DNSServer.h>
@@ -44,9 +46,9 @@
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 #include <Ticker.h>
-#include <ArduinoOTA.h>
 
-#define VERSION   "v1.0.0"
+
+#define VERSION   "v1.1.0"
  
 #define LED_TOUR1	0
 #define LED_TOUR2	1
@@ -60,7 +62,7 @@
 #define NUMPIXELS_TOUR   4
 #define NUMPIXELS_CENTRE 1
  
-#define DEF_URL_EDF_PART "https://particulier.edf.fr/services/rest/referentiel/searchTempoStore?dateRelevant="
+#define DEF_URL_TEMPO   "https://www.api-couleur-tempo.fr/api/jourTempo"
 #define DEF_MODULE_NAME  "ColorTEMPO"
 
 #define MAX_BUFFER      64
@@ -75,8 +77,8 @@ const unsigned long TEMPS_MAJ  =  5000; // 5s
 
 char buffer[MAX_BUFFER];
 char module_name[MAX_BUFFER];
-char couleur_jour[MAX_BUFFER];
-char couleur_demain[MAX_BUFFER];
+uint8_t couleur_jour = 0;
+uint8_t couleur_demain = 0;
 bool flag_call = true;
 bool flag_first = true;
 bool state_led = false;
@@ -105,7 +107,7 @@ uint32_t color_led = red;
 
 
 //-----------------------------------------------------------------------
-void round()
+void fround()
 {
   if (cpt_led > 0) pixels_tour.setPixelColor(cpt_led-1, color_led);
   pixels_tour.show();
@@ -162,7 +164,7 @@ String return_current_time()
 //-----------------------------------------------------------------------
 void configModeCallback (WiFiManager *myWiFiManager) {
   color_led = green;
-  timer_round.attach_ms(400, round);
+  timer_round.attach_ms(400, fround);
 }
 
 //-----------------------------------------------------------------------
@@ -172,7 +174,7 @@ void checkButton(){
     // poor mans debounce/press-hold, code not ideal for production
     delay(50);
     color_led = purple;
-    timer_round.attach_ms(250, round);
+    timer_round.attach_ms(250, fround);
     pixels_centre.clear();
     pixels_centre.show();
 
@@ -184,7 +186,7 @@ void checkButton(){
         Serial.println("Button Held");
         Serial.println("Erasing Config, restarting");
         color_led = yellow;
-        timer_round.attach_ms(50, round);
+        timer_round.attach_ms(50, fround);
         lastTime_maj = millis();
         while (millis() - lastTime_maj < 1000) {}
         wm.resetSettings();
@@ -217,17 +219,19 @@ void interrogation_tempo()
   String Url;
   HTTPClient http;
   int httpCode = 0;
+  String Reponse_tempo;
+  DeserializationError error;
+  JsonObject json;
 
   Serial.println(F("interrogation_tempo"));
-
-  Url = String(DEF_URL_EDF_PART) + return_current_date();
-
-  Serial.println(Url);
-  http.begin(Url);
 
   pixels_centre.setPixelColor(LED_CENTRE, purple);
   pixels_centre.show();
 
+  // Récup coulour jour ---------------------------
+  Url = String(DEF_URL_TEMPO) + "/today";
+  Serial.println(Url);
+  http.begin(Url);
   do 
   {
     httpCode = http.GET();
@@ -242,21 +246,53 @@ void interrogation_tempo()
   pixels_centre.setPixelColor(LED_CENTRE, purple);
   pixels_centre.show();
 
-  String Reponse_tempo = http.getString();
+  Reponse_tempo = http.getString();
   Serial.println(Reponse_tempo);
 
   DynamicJsonDocument jsonDoc(512);
-  DeserializationError error = deserializeJson(jsonDoc, Reponse_tempo);
+  error = deserializeJson(jsonDoc, Reponse_tempo);
   if (error) Serial.println(F("Impossible de parser Reponse_tempo"));
-  JsonObject json = jsonDoc.as<JsonObject>();
+  json = jsonDoc.as<JsonObject>();
   //Serial.println(F("Contenu:"));
   //serializeJson(json, Serial);
 
-  strcpy(couleur_jour, json["couleurJourJ"]);
-  strcpy(couleur_demain, json["couleurJourJ1"]);
+  couleur_jour = json["codeJour"];
 
   Serial.print(F("Jour: "));
   Serial.println(couleur_jour);
+
+  http.end();
+
+  // Récup coulour lendemain ---------------------------
+  Url = String(DEF_URL_TEMPO) + "/tomorrow";
+  Serial.println(Url);
+  http.begin(Url);
+  do 
+  {
+    httpCode = http.GET();
+    if (httpCode != HTTP_CODE_OK) {
+      pixels_centre.setPixelColor(LED_CENTRE, yellow);
+      pixels_centre.show();
+      delay(3000);
+    }
+  }
+  while (httpCode != HTTP_CODE_OK);
+
+  pixels_centre.setPixelColor(LED_CENTRE, purple);
+  pixels_centre.show();
+
+  Reponse_tempo = http.getString();
+  Serial.println(Reponse_tempo);
+
+  //DynamicJsonDocument jsonDoc(512);
+  error = deserializeJson(jsonDoc, Reponse_tempo);
+  if (error) Serial.println(F("Impossible de parser Reponse_tempo"));
+  json = jsonDoc.as<JsonObject>();
+  //Serial.println(F("Contenu:"));
+  //serializeJson(json, Serial);
+
+  couleur_demain = json["codeJour"];
+
   Serial.print(F("Demain: "));
   Serial.println(couleur_demain);
 
@@ -270,15 +306,15 @@ void affiche_couleur()
 	timer_round.detach();
 	
 	pixels_tour.clear();
-	if (strstr(couleur_jour, "BLEU")) pixels_tour.fill(blue, LED_TOUR1, LED_TOUR4+1);
-	if (strstr(couleur_jour, "BLANC")) pixels_tour.fill(white, LED_TOUR1, LED_TOUR4+1);
-	if (strstr(couleur_jour, "ROUGE")) pixels_tour.fill(red, LED_TOUR1, LED_TOUR4+1);
+	if (couleur_jour == 1) pixels_tour.fill(blue, LED_TOUR1, LED_TOUR4+1);
+	if (couleur_jour == 2) pixels_tour.fill(white, LED_TOUR1, LED_TOUR4+1);
+	if (couleur_jour == 3) pixels_tour.fill(red, LED_TOUR1, LED_TOUR4+1);
 	pixels_tour.show();
 
 	pixels_centre.clear();
-	if (strstr(couleur_demain, "BLEU")) pixels_centre.setPixelColor(LED_CENTRE, blue);
-	if (strstr(couleur_demain, "BLANC")) pixels_centre.setPixelColor(LED_CENTRE, white);
-	if (strstr(couleur_demain, "ROUGE")) pixels_centre.setPixelColor(LED_CENTRE, red);
+	if (couleur_demain == 1) pixels_centre.setPixelColor(LED_CENTRE, blue);
+	if (couleur_demain == 2) pixels_centre.setPixelColor(LED_CENTRE, white);
+	if (couleur_demain == 3) pixels_centre.setPixelColor(LED_CENTRE, red);
 	pixels_centre.show();
 }
 
@@ -286,7 +322,7 @@ void affiche_couleur()
 void handlePreOtaUpdateCallback(){
   Update.onProgress([](unsigned int progress, unsigned int total) {
     color_led = orange;
-    timer_round.attach_ms(100, round);
+    timer_round.attach_ms(100, fround);
     Serial.printf("CUSTOM Progress: %u%%\r", (progress / (total / 100)));
   });
 }
@@ -318,7 +354,7 @@ void setup() {
   pixels_centre.show();
   
   color_led = purple;
-  timer_round.attach_ms(250, round);
+  timer_round.attach_ms(250, fround);
   
   sprintf(module_name, "%s_%06X", DEF_MODULE_NAME, ESP.getEfuseMac());
   
@@ -378,7 +414,7 @@ uint32_t currentTime = millis();
   }
 
   minute_courante = timeClient.getMinutes();
-  if (minute_courante == 0 || minute_courante == 15 || minute_courante == 30) {
+  if ((minute_courante % 5) == 0) {  // maj toutes les 5 minutes
     if (flag_call == true) interrogation_tempo();
     flag_call = false;
   }
