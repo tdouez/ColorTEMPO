@@ -31,6 +31,7 @@
 // 2023/12/20 - FB V1.0.0
 // 2024/04/04 - FB V1.0.1 - Mise à jour toutes les 5mn
 // 2024/09/05 - FB V1.1.0 - Changement de serveur pour la récupération de la couleur TEMPO
+// 2024-12-04 - FB V1.1.1 - Ajout test reset au démarrage du module
 //--------------------------------------------------------------------
 #include <Arduino.h>
 #include <DNSServer.h>
@@ -48,7 +49,7 @@
 #include <Ticker.h>
 
 
-#define VERSION   "v1.1.0"
+#define VERSION   "v1.1.1"
  
 #define LED_TOUR1	0
 #define LED_TOUR2	1
@@ -343,14 +344,25 @@ void setup() {
   Serial.println(F("  _| \\_,_| _|_|_| \\___| \\___|   ___/ _| \\___| \\_,_| \\___|"));
   Serial.print(F("   ColorTEMPO                                     "));
   Serial.println(VERSION);
+
+  if( digitalRead(PIN_BP) == LOW ){
+      Serial.println(F(">>Reset"));
+      Serial.println(F(">>Erasing Config, restarting"));
+      color_led = yellow;
+      timer_round.attach_ms(50, fround);
+      lastTime_maj = millis();
+      while (millis() - lastTime_maj < 1000) {}
+      wm.resetSettings();
+      ESP.restart();
+  }
  
   pixels_tour.begin(); // INITIALIZE NeoPixel
   pixels_tour.clear(); // Set all pixel colors to 'off'
-  pixels_tour.setBrightness(60);
+  pixels_tour.setBrightness(30);
   pixels_tour.show();
   pixels_centre.begin(); // INITIALIZE NeoPixel
   pixels_centre.clear(); // Set all pixel colors to 'off'
-  pixels_centre.setBrightness(90);
+  pixels_centre.setBrightness(100);
   pixels_centre.show();
   
   color_led = purple;
